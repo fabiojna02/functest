@@ -49,7 +49,7 @@ class VmReady1(tenantnetwork.TenantNetwork1):
     flavor_alt_ram = 1024
     flavor_alt_vcpus = 1
     flavor_alt_disk = 1
-    create_server_timeout = 60
+    create_server_timeout = 180
 
     def __init__(self, **kwargs):
         if "case_name" not in kwargs:
@@ -179,7 +179,7 @@ class VmReady1(tenantnetwork.TenantNetwork1):
         vm1 = self.cloud.create_server(
             name if name else '{}-vm_{}'.format(self.case_name, self.guid),
             image=self.image.id, flavor=self.flavor.id,
-            auto_ip=False, wait=True, network=self.network.id,
+            auto_ip=False, network=self.network.id,
             timeout=self.create_server_timeout, **kwargs)
         vm1 = self.cloud.wait_for_server(vm1, auto_ip=False)
         self.__logger.debug("vm: %s", vm1)
@@ -381,8 +381,9 @@ class SingleVm1(VmReady1):
 
         Returns: echo exit codes
         """
-        (_, stdout, _) = self.ssh.exec_command('echo Hello World')
+        (_, stdout, stderr) = self.ssh.exec_command('echo Hello World')
         self.__logger.debug("output:\n%s", stdout.read())
+        self.__logger.debug("error:\n%s", stderr.read())
         return stdout.channel.recv_exit_status()
 
     def run(self, **kwargs):
