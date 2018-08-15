@@ -44,7 +44,7 @@ CI_INSTALLER_TYPE = env.get('INSTALLER_TYPE')
 LOGGER = logging.getLogger(__name__)
 
 
-def create_rally_deployment():
+def create_rally_deployment(environ=None):
     """Create new rally deployment"""
     # set the architecture to default
     pod_arch = env.get("POD_ARCH")
@@ -55,7 +55,7 @@ def create_rally_deployment():
         with open(RALLY_AARCH64_PATCH_PATH, "r") as pfile:
             rally_patch_conf = pfile.read()
 
-        for line in fileinput.input(RALLY_CONF_PATH, inplace=1):
+        for line in fileinput.input(RALLY_CONF_PATH):
             print(line, end=' ')
             if "cirros|testvm" in line:
                 print(rally_patch_conf)
@@ -73,7 +73,7 @@ def create_rally_deployment():
 
     cmd = ['rally', 'deployment', 'create', '--fromenv',
            '--name', str(getattr(config.CONF, 'rally_deployment_name'))]
-    output = subprocess.check_output(cmd)
+    output = subprocess.check_output(cmd, env=environ)
     LOGGER.info("%s\n%s", " ".join(cmd), output)
 
     cmd = ['rally', 'deployment', 'check']

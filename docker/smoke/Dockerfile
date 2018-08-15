@@ -4,7 +4,7 @@ ARG BRANCH=master
 ARG OPENSTACK_TAG=stable/queens
 ARG REFSTACK_TARGET=2017.09
 ARG PATROLE_TAG=0.3.0
-ARG VMTP_TAG=9c016e3f9683ae557e8271ef358d9c1b59126cdf
+ARG VMTP_TAG=99b261ccccc2f8a08ee2d8fca9f54ef9d69899d7
 
 RUN apk --no-cache add --update libxml2 libxslt && \
     apk --no-cache add --virtual .build-deps --update \
@@ -26,7 +26,8 @@ RUN apk --no-cache add --update libxml2 libxslt && \
     git clone --depth 1 https://github.com/openstack/barbican-tempest-plugin.git /src/barbican-tempest-plugin && \
     update-requirements -s --source /src/openstack-requirements /src/barbican-tempest-plugin/ && \
     pip install --no-cache-dir --src /src -cupper-constraints.txt -cupper-constraints.opnfv.txt \
-        /src/patrole /src/barbican-tempest-plugin /src/neutron-tempest-plugin /src/vmtp && \
+        /src/patrole /src/barbican-tempest-plugin /src/neutron-tempest-plugin \
+        networking-bgpvpn networking-sfc /src/vmtp && \
     virtualenv --system-site-packages /src/tempest/.venv && \
     rm -r upper-constraints.txt upper-constraints.opnfv.txt \
         /src/patrole /src/barbican-tempest-plugin /src/neutron-tempest-plugin /src/vmtp && \

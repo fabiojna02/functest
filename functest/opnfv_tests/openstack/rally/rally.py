@@ -33,7 +33,7 @@ from functest.utils import env
 LOGGER = logging.getLogger(__name__)
 
 
-class RallyBase(singlevm.VmReady1):
+class RallyBase(singlevm.VmReady2):
     """Base class form Rally testcases implementation."""
 
     # pylint: disable=too-many-instance-attributes
@@ -62,6 +62,18 @@ class RallyBase(singlevm.VmReady1):
     def __init__(self, **kwargs):
         """Initialize RallyBase object."""
         super(RallyBase, self).__init__(**kwargs)
+        assert self.orig_cloud
+        assert self.project
+        if self.orig_cloud.get_role("admin"):
+            role_name = "admin"
+        elif self.orig_cloud.get_role("Admin"):
+            role_name = "Admin"
+        else:
+            raise Exception("Cannot detect neither admin nor Admin")
+        self.orig_cloud.grant_role(
+            role_name, user=self.project.user.id,
+            project=self.project.project.id,
+            domain=self.project.domain.id)
         self.creators = []
         self.mode = ''
         self.summary = []
@@ -167,14 +179,6 @@ class RallyBase(singlevm.VmReady1):
             return True
 
         return False
-
-    @staticmethod
-    def get_cmd_output(proc):
-        """Get command stdout."""
-        result = ""
-        for line in proc.stdout:
-            result += line
-        return result
 
     @staticmethod
     def excl_scenario():
@@ -345,23 +349,15 @@ class RallyBase(singlevm.VmReady1):
                 task_file, "--task-args",
                 str(self._build_task_args(test_name))])
         LOGGER.debug('running command: %s', cmd)
-
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT)
-        output = self.get_cmd_output(proc)
+        output = proc.communicate()[0]
+
         task_id = self.get_task_id(output)
-
         LOGGER.debug('task_id : %s', task_id)
-
         if task_id is None:
-            LOGGER.error('Failed to retrieve task_id, validating task...')
-            cmd = (["rally", "task", "validate", "--task", task_file,
-                    "--task-args", str(self._build_task_args(test_name))])
-            LOGGER.debug('running command: %s', cmd)
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                                    stderr=subprocess.STDOUT)
-            output = self.get_cmd_output(proc)
-            LOGGER.error("Task validation result:" + "\n" + output)
+            LOGGER.error("Failed to retrieve task_id")
+            LOGGER.error("Result:\n%s", output)
             raise Exception("Failed to retrieve task id")
 
         self._save_results(test_name, task_id)
@@ -492,7 +488,13 @@ class RallyBase(singlevm.VmReady1):
         try:
             assert super(RallyBase, self).run(
                 **kwargs) == testcase.TestCase.EX_OK
-            conf_utils.create_rally_deployment()
+            environ = dict(
+                os.environ,
+                OS_USERNAME=self.project.user.name,
+                OS_PROJECT_NAME=self.project.project.name,
+                OS_PROJECT_ID=self.project.project.id,
+                OS_PASSWORD=self.project.password)
+            conf_utils.create_rally_deployment(environ=environ)
             self._prepare_env()
             self._run_tests()
             self._generate_report()
