@@ -1,10 +1,5 @@
-functest.opnfv_tests.sdn.odl package
-====================================
-
-.. automodule:: functest.opnfv_tests.sdn.odl
-    :members:
-    :undoc-members:
-    :show-inheritance:
+functest.opnfv\_tests.sdn.odl package
+=====================================
 
 Submodules
 ----------
@@ -13,3 +8,10 @@ Submodules
 
    functest.opnfv_tests.sdn.odl.odl
 
+Module contents
+---------------
+
+.. automodule:: functest.opnfv_tests.sdn.odl
+    :members:
+    :undoc-members:
+    :show-inheritance:

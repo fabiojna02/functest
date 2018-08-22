@@ -1,5 +1,5 @@
-functest.opnfv_tests.sdn.odl.odl module
-=======================================
+functest.opnfv\_tests.sdn.odl.odl module
+========================================
 
 .. automodule:: functest.opnfv_tests.sdn.odl.odl
     :members:

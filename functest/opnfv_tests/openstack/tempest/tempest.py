@@ -36,6 +36,7 @@ class TempestCommon(singlevm.VmReady1):
     """TempestCommon testcases implementation class."""
 
     visibility = 'public'
+    shared_network = True
     filename_alt = '/home/opnfv/functest/images/cirros-0.4.0-x86_64-disk.img'
 
     def __init__(self, **kwargs):
@@ -226,6 +227,10 @@ class TempestCommon(singlevm.VmReady1):
             raise Exception('Verification UUID not found')
         LOGGER.info('Verification UUID: %s', self.verification_id)
 
+        shutil.copy(
+            "{}/tempest.log".format(self.deployment_dir),
+            "{}/tempest.debug.log".format(self.res_dir))
+
     def parse_verifier_result(self):
         """Parse and save test results."""
         stat = self.get_verifier_result(self.verification_id)
@@ -315,6 +320,22 @@ class TempestCommon(singlevm.VmReady1):
         with open(rally_conf, 'wb') as config_file:
             rconfig.write(config_file)
 
+    @staticmethod
+    def clean_rally_conf(rally_conf='/etc/rally/rally.conf'):
+        """Clean Rally config"""
+        rconfig = configparser.RawConfigParser()
+        rconfig.read(rally_conf)
+        if rconfig.has_option('tempest', 'img_name_regex'):
+            rconfig.remove_option('tempest', 'img_name_regex')
+        if rconfig.has_option('tempest', 'swift_operator_role'):
+            rconfig.remove_option('tempest', 'swift_operator_role')
+        if rconfig.has_option('DEFAULT', 'log-file'):
+            rconfig.remove_option('DEFAULT', 'log-file')
+        if rconfig.has_option('DEFAULT', 'log_dir'):
+            rconfig.remove_option('DEFAULT', 'log_dir')
+        with open(rally_conf, 'wb') as config_file:
+            rconfig.write(config_file)
+
     def configure(self, **kwargs):  # pylint: disable=unused-argument
         """
         Create all openstack resources for tempest-based testcases and write
@@ -330,7 +351,7 @@ class TempestCommon(singlevm.VmReady1):
 
         self.conf_file = conf_utils.configure_verifier(self.deployment_dir)
         conf_utils.configure_tempest_update_params(
-            self.conf_file, network_name=self.network.id,
+            self.conf_file, network_name=self.network.name,
             image_id=self.image.id,
             flavor_id=self.flavor.id,
             compute_cnt=compute_cnt,
@@ -346,6 +367,7 @@ class TempestCommon(singlevm.VmReady1):
             self.update_rally_regex()
             self.update_default_role()
             self.update_rally_logs()
+            shutil.copy("/etc/rally/rally.conf", self.res_dir)
             self.configure(**kwargs)
             self.generate_test_list(**kwargs)
             self.apply_tempest_blacklist()
@@ -364,6 +386,7 @@ class TempestCommon(singlevm.VmReady1):
         """
         Cleanup all OpenStack objects. Should be called on completion.
         """
+        self.clean_rally_conf()
         if self.image_alt:
             self.cloud.delete_image(self.image_alt)
         if self.flavor_alt:
