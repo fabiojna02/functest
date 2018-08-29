@@ -167,19 +167,15 @@ class TempestCommon(singlevm.VmReady1):
         result_file = open(self.list, 'w')
         black_tests = []
         try:
-            installer_type = env.get('INSTALLER_TYPE')
             deploy_scenario = env.get('DEPLOY_SCENARIO')
-            if bool(installer_type) * bool(deploy_scenario):
-                # if INSTALLER_TYPE and DEPLOY_SCENARIO are set we read the
-                # file
+            if bool(deploy_scenario):
+                # if DEPLOY_SCENARIO is set we read the file
                 black_list_file = open(conf_utils.TEMPEST_BLACKLIST)
                 black_list_yaml = yaml.safe_load(black_list_file)
                 black_list_file.close()
                 for item in black_list_yaml:
                     scenarios = item['scenarios']
-                    installers = item['installers']
-                    if (deploy_scenario in scenarios and
-                            installer_type in installers):
+                    if deploy_scenario in scenarios:
                         tests = item['tests']
                         for test in tests:
                             black_tests.append(test)
@@ -356,7 +352,8 @@ class TempestCommon(singlevm.VmReady1):
             flavor_id=self.flavor.id,
             compute_cnt=compute_cnt,
             image_alt_id=self.image_alt.id,
-            flavor_alt_id=self.flavor_alt.id)
+            flavor_alt_id=self.flavor_alt.id,
+            domain_name=self.cloud.auth.get("project_domain_name", "Default"))
         self.backup_tempest_config(self.conf_file, self.res_dir)
 
     def run(self, **kwargs):
