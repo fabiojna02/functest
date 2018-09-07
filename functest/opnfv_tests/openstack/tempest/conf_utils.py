@@ -19,6 +19,7 @@ import os
 import subprocess
 
 import pkg_resources
+import six
 from six.moves import configparser
 import yaml
 
@@ -80,6 +81,7 @@ def create_rally_deployment(environ=None):
     cmd = ['rally', 'deployment', 'check']
     output = subprocess.check_output(cmd)
     LOGGER.info("%s\n%s", " ".join(cmd), output)
+    return get_verifier_deployment_id()
 
 
 def create_verifier():
@@ -100,25 +102,21 @@ def create_verifier():
            '--type', 'tempest', '--system-wide']
     output = subprocess.check_output(cmd)
     LOGGER.info("%s\n%s", " ".join(cmd), output)
+    return get_verifier_id()
 
 
 def get_verifier_id():
     """
     Returns verifier id for current Tempest
     """
-    create_rally_deployment()
-    create_verifier()
     cmd = ("rally verify list-verifiers | awk '/" +
            getattr(config.CONF, 'tempest_verifier_name') +
            "/ {print $2}'")
     proc = subprocess.Popen(cmd, shell=True,
                             stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT)
-    deployment_uuid = proc.stdout.readline().rstrip()
-    if deployment_uuid == "":
-        LOGGER.error("Tempest verifier not found.")
-        raise Exception('Error with command:%s' % cmd)
-    return deployment_uuid
+    verifier_uuid = proc.stdout.readline().rstrip()
+    return verifier_uuid
 
 
 def get_verifier_deployment_id():
@@ -132,9 +130,6 @@ def get_verifier_deployment_id():
                             stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT)
     deployment_uuid = proc.stdout.readline().rstrip()
-    if deployment_uuid == "":
-        LOGGER.error("Rally deployment not found.")
-        raise Exception('Error with command:%s' % cmd)
     return deployment_uuid
 
 
@@ -142,9 +137,6 @@ def get_verifier_repo_dir(verifier_id):
     """
     Returns installed verifier repo directory for Tempest
     """
-    if not verifier_id:
-        verifier_id = get_verifier_id()
-
     return os.path.join(getattr(config.CONF, 'dir_rally_inst'),
                         'verification',
                         'verifier-{}'.format(verifier_id),
@@ -155,12 +147,6 @@ def get_verifier_deployment_dir(verifier_id, deployment_id):
     """
     Returns Rally deployment directory for current verifier
     """
-    if not verifier_id:
-        verifier_id = get_verifier_id()
-
-    if not deployment_id:
-        deployment_id = get_verifier_deployment_id()
-
     return os.path.join(getattr(config.CONF, 'dir_rally_inst'),
                         'verification',
                         'verifier-{}'.format(verifier_id),
@@ -221,7 +207,9 @@ def configure_tempest_update_params(
     else:
         auth_version = 'v2'
     if env.get("NEW_USER_ROLE").lower() != "member":
-        rconfig.set('auth', 'tempest_roles', env.get("NEW_USER_ROLE"))
+        rconfig.set(
+            'auth', 'tempest_roles',
+            convert_list_to_ini([env.get("NEW_USER_ROLE")]))
     if not json.loads(env.get("USE_DYNAMIC_CREDENTIALS").lower()):
         rconfig.set('auth', 'use_dynamic_credentials', False)
         account_file = os.path.join(
@@ -269,7 +257,18 @@ def configure_verifier(deployment_dir):
     if not os.path.isfile(tempest_conf_file):
         LOGGER.error("Tempest configuration file %s NOT found.",
                      tempest_conf_file)
-        raise Exception("Tempest configuration file %s NOT found."
-                        % tempest_conf_file)
-    else:
-        return tempest_conf_file
+        return None
+    return tempest_conf_file
+
+
+def convert_dict_to_ini(value):
+    "Convert dict to oslo.conf input"
+    assert isinstance(value, dict)
+    return ",".join("{}={}".format(
+        key, val) for (key, val) in six.iteritems(value))
+
+
+def convert_list_to_ini(value):
+    "Convert list to oslo.conf input"
+    assert isinstance(value, list)
+    return ",".join("{}".format(val) for val in value)

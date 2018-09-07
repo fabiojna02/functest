@@ -31,7 +31,7 @@ from functest.utils import env
 LOGGER = logging.getLogger(__name__)
 
 
-class TempestCommon(singlevm.VmReady1):
+class TempestCommon(singlevm.VmReady2):
     # pylint: disable=too-many-instance-attributes
     """TempestCommon testcases implementation class."""
 
@@ -43,10 +43,34 @@ class TempestCommon(singlevm.VmReady1):
         if "case_name" not in kwargs:
             kwargs["case_name"] = 'tempest'
         super(TempestCommon, self).__init__(**kwargs)
-        self.verifier_id = conf_utils.get_verifier_id()
+        assert self.orig_cloud
+        assert self.cloud
+        assert self.project
+        if self.orig_cloud.get_role("admin"):
+            role_name = "admin"
+        elif self.orig_cloud.get_role("Admin"):
+            role_name = "Admin"
+        else:
+            raise Exception("Cannot detect neither admin nor Admin")
+        self.orig_cloud.grant_role(
+            role_name, user=self.project.user.id,
+            project=self.project.project.id,
+            domain=self.project.domain.id)
+        environ = dict(
+            os.environ,
+            OS_USERNAME=self.project.user.name,
+            OS_PROJECT_NAME=self.project.project.name,
+            OS_PROJECT_ID=self.project.project.id,
+            OS_PASSWORD=self.project.password)
+        self.deployment_id = conf_utils.create_rally_deployment(
+            environ=environ)
+        if not self.deployment_id:
+            raise Exception("Deployment create failed")
+        self.verifier_id = conf_utils.create_verifier()
+        if not self.verifier_id:
+            raise Exception("Verifier create failed")
         self.verifier_repo_dir = conf_utils.get_verifier_repo_dir(
             self.verifier_id)
-        self.deployment_id = conf_utils.get_verifier_deployment_id()
         self.deployment_dir = conf_utils.get_verifier_deployment_dir(
             self.verifier_id, self.deployment_id)
         self.verification_id = None
@@ -285,9 +309,9 @@ class TempestCommon(singlevm.VmReady1):
         """Set image name as tempest img_name_regex"""
         rconfig = configparser.RawConfigParser()
         rconfig.read(rally_conf)
-        if not rconfig.has_section('tempest'):
-            rconfig.add_section('tempest')
-        rconfig.set('tempest', 'img_name_regex', '^{}$'.format(
+        if not rconfig.has_section('openstack'):
+            rconfig.add_section('openstack')
+        rconfig.set('openstack', 'img_name_regex', '^{}$'.format(
             self.image.name))
         with open(rally_conf, 'wb') as config_file:
             rconfig.write(config_file)
@@ -299,9 +323,9 @@ class TempestCommon(singlevm.VmReady1):
             return
         rconfig = configparser.RawConfigParser()
         rconfig.read(rally_conf)
-        if not rconfig.has_section('tempest'):
-            rconfig.add_section('tempest')
-        rconfig.set('tempest', 'swift_operator_role', role.name)
+        if not rconfig.has_section('openstack'):
+            rconfig.add_section('openstack')
+        rconfig.set('openstack', 'swift_operator_role', role.name)
         with open(rally_conf, 'wb') as config_file:
             rconfig.write(config_file)
 
@@ -321,15 +345,38 @@ class TempestCommon(singlevm.VmReady1):
         """Clean Rally config"""
         rconfig = configparser.RawConfigParser()
         rconfig.read(rally_conf)
-        if rconfig.has_option('tempest', 'img_name_regex'):
-            rconfig.remove_option('tempest', 'img_name_regex')
-        if rconfig.has_option('tempest', 'swift_operator_role'):
-            rconfig.remove_option('tempest', 'swift_operator_role')
+        if rconfig.has_option('openstack', 'img_name_regex'):
+            rconfig.remove_option('openstack', 'img_name_regex')
+        if rconfig.has_option('openstack', 'swift_operator_role'):
+            rconfig.remove_option('openstack', 'swift_operator_role')
         if rconfig.has_option('DEFAULT', 'log-file'):
             rconfig.remove_option('DEFAULT', 'log-file')
         if rconfig.has_option('DEFAULT', 'log_dir'):
             rconfig.remove_option('DEFAULT', 'log_dir')
         with open(rally_conf, 'wb') as config_file:
+            rconfig.write(config_file)
+
+    def update_scenario_section(self):
+        """Update scenario section in tempest.conf"""
+        rconfig = configparser.RawConfigParser()
+        rconfig.read(self.conf_file)
+        filename = getattr(
+            config.CONF, '{}_image'.format(self.case_name), self.filename)
+        if not rconfig.has_section('scenario'):
+            rconfig.add_section('scenario')
+        rconfig.set('scenario', 'img_file', os.path.basename(filename))
+        rconfig.set('scenario', 'img_dir', os.path.dirname(filename))
+        rconfig.set('scenario', 'img_disk_format', getattr(
+            config.CONF, '{}_image_format'.format(self.case_name),
+            self.image_format))
+        extra_properties = self.extra_properties.copy()
+        extra_properties.update(
+            getattr(config.CONF, '{}_extra_properties'.format(
+                self.case_name), {}))
+        rconfig.set(
+            'scenario', 'img_properties',
+            conf_utils.convert_dict_to_ini(extra_properties))
+        with open(self.conf_file, 'wb') as config_file:
             rconfig.write(config_file)
 
     def configure(self, **kwargs):  # pylint: disable=unused-argument
@@ -346,6 +393,8 @@ class TempestCommon(singlevm.VmReady1):
         LOGGER.debug("flavor: %s", self.flavor_alt)
 
         self.conf_file = conf_utils.configure_verifier(self.deployment_dir)
+        if not self.conf_file:
+            raise Exception("Tempest verifier configuring failed")
         conf_utils.configure_tempest_update_params(
             self.conf_file, network_name=self.network.name,
             image_id=self.image.id,
@@ -354,6 +403,7 @@ class TempestCommon(singlevm.VmReady1):
             image_alt_id=self.image_alt.id,
             flavor_alt_id=self.flavor_alt.id,
             domain_name=self.cloud.auth.get("project_domain_name", "Default"))
+        self.update_scenario_section()
         self.backup_tempest_config(self.conf_file, self.res_dir)
 
     def run(self, **kwargs):
