@@ -1,24 +1,17 @@
 FROM opnfv/functest-core
 
 ARG BRANCH=master
-ARG OPENSTACK_TAG=stable/queens
+ARG OPENSTACK_TAG=master
 ARG RALLY_TAG=1.1.0
-ARG RALLY_OPENSTACK_TAG=1.2.0
+ARG RALLY_OPENSTACK_TAG=67882d55ca453d6aa863d279ec4cfc2b52c80f0a
 ARG OS_FAULTS_TAG=0.1.17
 
 RUN apk --no-cache add --virtual .build-deps --update \
         python-dev build-base linux-headers libffi-dev \
         openssl-dev libjpeg-turbo-dev && \
-    case $OPENSTACK_TAG in \
-    master) \
-        wget -q -O- https://git.openstack.org/cgit/openstack/requirements/plain/upper-constraints.txt?h=$OPENSTACK_TAG | \
-            sed -E s/^tempest==+.*$/-e\ git+https:\\/\\/git.openstack.org\\/openstack\\/tempest#egg=tempest/ \
-            > upper-constraints.txt ;; \
-    *) \
-        wget -q -O- https://git.openstack.org/cgit/openstack/requirements/plain/upper-constraints.txt?h=$OPENSTACK_TAG | \
-            sed -E s/^tempest==+\(.*\)$/-e\ git+https:\\/\\/git.openstack.org\\/openstack\\/tempest@\\1#egg=tempest/ \
-            > upper-constraints.txt ;; \
-    esac && \
+    wget -q -O- https://git.openstack.org/cgit/openstack/requirements/plain/upper-constraints.txt?h=$OPENSTACK_TAG | \
+        sed -E s/^tempest==+.*$/-e\ git+https:\\/\\/git.openstack.org\\/openstack\\/tempest#egg=tempest/ \
+        > upper-constraints.txt && \
     wget -q -O- https://git.opnfv.org/functest/plain/upper-constraints.txt?h=$BRANCH | \
         sed -E /#egg=functest/d > upper-constraints.opnfv.txt && \
     git init /src/os-faults && \
