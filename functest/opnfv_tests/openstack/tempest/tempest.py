@@ -36,7 +36,6 @@ class TempestCommon(singlevm.VmReady2):
     """TempestCommon testcases implementation class."""
 
     visibility = 'public'
-    shared_network = True
     filename_alt = '/home/opnfv/functest/images/cirros-0.4.0-x86_64-disk.img'
 
     def __init__(self, **kwargs):
@@ -47,14 +46,17 @@ class TempestCommon(singlevm.VmReady2):
         assert self.cloud
         assert self.project
         if self.orig_cloud.get_role("admin"):
-            role_name = "admin"
+            self.role_name = "admin"
         elif self.orig_cloud.get_role("Admin"):
-            role_name = "Admin"
+            self.role_name = "Admin"
         else:
             raise Exception("Cannot detect neither admin nor Admin")
         self.orig_cloud.grant_role(
-            role_name, user=self.project.user.id,
+            self.role_name, user=self.project.user.id,
             project=self.project.project.id,
+            domain=self.project.domain.id)
+        self.orig_cloud.grant_role(
+            self.role_name, user=self.project.user.id,
             domain=self.project.domain.id)
         environ = dict(
             os.environ,
@@ -62,6 +64,11 @@ class TempestCommon(singlevm.VmReady2):
             OS_PROJECT_NAME=self.project.project.name,
             OS_PROJECT_ID=self.project.project.id,
             OS_PASSWORD=self.project.password)
+        try:
+            del environ['OS_TENANT_NAME']
+            del environ['OS_TENANT_ID']
+        except Exception:  # pylint: disable=broad-except
+            pass
         self.deployment_id = conf_utils.create_rally_deployment(
             environ=environ)
         if not self.deployment_id:
@@ -92,6 +99,9 @@ class TempestCommon(singlevm.VmReady2):
                 'neutron_extensions']
         except Exception:  # pylint: disable=broad-except
             pass
+
+    def create_network_resources(self):
+        pass
 
     def check_services(self):
         """Check the mandatory services."""
@@ -398,13 +408,14 @@ class TempestCommon(singlevm.VmReady2):
         if not self.conf_file:
             raise Exception("Tempest verifier configuring failed")
         conf_utils.configure_tempest_update_params(
-            self.conf_file, network_name=self.network.name,
+            self.conf_file,
             image_id=self.image.id,
             flavor_id=self.flavor.id,
             compute_cnt=compute_cnt,
             image_alt_id=self.image_alt.id,
             flavor_alt_id=self.flavor_alt.id,
-            domain_name=self.cloud.auth.get("project_domain_name", "Default"))
+            admin_role_name=self.role_name, cidr=self.cidr,
+            domain_id=self.project.domain.id)
         self.update_scenario_section()
         self.backup_tempest_config(self.conf_file, self.res_dir)
 
