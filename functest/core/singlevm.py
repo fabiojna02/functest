@@ -23,6 +23,8 @@ from xtesting.core import testcase
 
 from functest.core import tenantnetwork
 from functest.utils import config
+from functest.utils import env
+from functest.utils import functest_utils
 
 
 class VmReady1(tenantnetwork.TenantNetwork1):
@@ -73,6 +75,10 @@ class VmReady1(tenantnetwork.TenantNetwork1):
         """
         assert self.cloud
         extra_properties = self.extra_properties.copy()
+        if env.get('IMAGE_PROPERTIES'):
+            extra_properties.update(
+                functest_utils.convert_ini_to_dict(
+                    env.get('IMAGE_PROPERTIES')))
         extra_properties.update(
             getattr(config.CONF, '{}_extra_properties'.format(
                 self.case_name), {}))
@@ -104,6 +110,10 @@ class VmReady1(tenantnetwork.TenantNetwork1):
         """
         assert self.cloud
         extra_alt_properties = self.extra_alt_properties.copy()
+        if env.get('IMAGE_PROPERTIES'):
+            extra_alt_properties.update(
+                functest_utils.convert_ini_to_dict(
+                    env.get('IMAGE_PROPERTIES')))
         extra_alt_properties.update(
             getattr(config.CONF, '{}_extra_alt_properties'.format(
                 self.case_name), {}))
@@ -145,6 +155,10 @@ class VmReady1(tenantnetwork.TenantNetwork1):
                     self.flavor_disk))
         self.__logger.debug("flavor: %s", flavor)
         flavor_extra_specs = self.flavor_extra_specs.copy()
+        if env.get('FLAVOR_EXTRA_SPECS'):
+            flavor_extra_specs.update(
+                functest_utils.convert_ini_to_dict(
+                    env.get('FLAVOR_EXTRA_SPECS')))
         flavor_extra_specs.update(
             getattr(config.CONF,
                     '{}_flavor_extra_specs'.format(self.case_name), {}))
@@ -173,6 +187,10 @@ class VmReady1(tenantnetwork.TenantNetwork1):
                     self.flavor_alt_disk))
         self.__logger.debug("flavor: %s", flavor)
         flavor_alt_extra_specs = self.flavor_alt_extra_specs.copy()
+        if env.get('FLAVOR_EXTRA_SPECS'):
+            flavor_alt_extra_specs.update(
+                functest_utils.convert_ini_to_dict(
+                    env.get('FLAVOR_EXTRA_SPECS')))
         flavor_alt_extra_specs.update(
             getattr(config.CONF,
                     '{}_flavor_alt_extra_specs'.format(self.case_name), {}))

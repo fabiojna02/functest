@@ -7,10 +7,8 @@ Functest Release Notes
 **********************
 
 .. toctree::
-   :numbered:
    :maxdepth: 4
 
    functest-release.rst
-   functest-gating.rst
 
 Build date: |today|

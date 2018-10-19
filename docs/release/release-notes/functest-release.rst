@@ -112,10 +112,8 @@ Docker tag for master: latest
 Documents
 ---------
 
- * Config Guide: https://functest.readthedocs.io/projects/configguide/en/latest/
- * User Guide: https://functest.readthedocs.io/projects/userguide/en/latest/
- * Developer Guide: https://functest.readthedocs.io/projects/devguide/en/latest/
- * API Docs: http://functest.readthedocs.io/en/latest/
+ * Functests Guides: https://functest.readthedocs.io/en/latest/
+ * API Docs: https://functest-api.readthedocs.io/en/latest/
 
 Version change
 ==============
@@ -178,7 +176,7 @@ Code quality
 Useful links
 ============
 
- * wiki project page: https://wiki.opnfv.org/opnfv_functional_testing
+ * wiki project page: https://wiki.opnfv.org/display/functest/Opnfv+Functional+Testing
  * Functest git repository: https://git.opnfv.org/cgit/functest
  * Functest CI dashboard: https://build.opnfv.org/ci/view/functest/
  * JIRA dashboard: https://jira.opnfv.org/secure/Dashboard.jspa?selectPageId=10611
