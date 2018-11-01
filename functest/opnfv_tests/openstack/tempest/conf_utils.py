@@ -195,7 +195,6 @@ def configure_tempest_update_params(
         # enable multinode tests
         rconfig.set('compute', 'min_compute_nodes', compute_cnt)
         rconfig.set('compute-feature-enabled', 'live_migration', True)
-    rconfig.set('compute-feature-enabled', 'shelve', False)
     filters = ['RetryFilter', 'AvailabilityZoneFilter', 'ComputeFilter',
                'ComputeCapabilitiesFilter', 'ImagePropertiesFilter',
                'ServerGroupAntiAffinityFilter', 'ServerGroupAffinityFilter']
@@ -219,8 +218,6 @@ def configure_tempest_update_params(
     rconfig.set('identity', 'admin_role', admin_role_name)
     rconfig.set('identity', 'admin_domain_scope', True)
     rconfig.set('identity', 'default_domain_id', domain_id)
-    rconfig.set('identity-feature-enabled', 'api_v2', False)
-    rconfig.set('identity-feature-enabled', 'api_v2_admin', False)
     if not rconfig.has_section('network'):
         rconfig.add_section('network')
     rconfig.set('network', 'default_network', cidr)
@@ -231,9 +228,6 @@ def configure_tempest_update_params(
         getattr(config.CONF, 'tempest_validation_ssh_timeout'))
     rconfig.set('object-storage', 'operator_role',
                 getattr(config.CONF, 'tempest_object_storage_operator_role'))
-    if not rconfig.has_section('volume'):
-        rconfig.add_section('volume')
-    rconfig.set('volume', 'storage_protocol', env.get('STORAGE_PROTOCOL'))
     rconfig.set(
         'identity', 'v3_endpoint_type',
         os.environ.get('OS_INTERFACE', 'public'))
