@@ -50,6 +50,7 @@ class Vmtp(singlevm.VmReady2):
     flavor_ram = 2048
     flavor_vcpus = 1
     flavor_disk = 0
+    create_server_timeout = 300
 
     def __init__(self, **kwargs):
         if "case_name" not in kwargs:
@@ -58,6 +59,12 @@ class Vmtp(singlevm.VmReady2):
         self.config = "{}/vmtp.conf".format(self.res_dir)
         (_, self.privkey_filename) = tempfile.mkstemp()
         (_, self.pubkey_filename) = tempfile.mkstemp()
+
+    def check_requirements(self):
+        if len(self.orig_cloud.list_hypervisors()) < 2:
+            self.__logger.warning("Vmtp requires at least 2 hypervisors")
+            self.is_skipped = True
+            self.project.clean()
 
     def create_network_resources(self):
         """Create router
