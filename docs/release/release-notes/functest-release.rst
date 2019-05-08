@@ -32,15 +32,12 @@ The internal test cases are:
  * vping_ssh
  * vping_userdata
  * cinder_test
- * api_check
- * snaps_health_check
  * odl
  * tempest_smoke
  * neutron-tempest-plugin-api
  * rally_sanity
  * refstack_defcore
  * patrole
- * snaps_smoke
  * neutron_trunk
  * networking-bgpvpn
  * networking-sfc
@@ -58,10 +55,8 @@ The internal test cases are:
 The OPNFV projects integrated into Functest framework for automation are:
 
  * doctor
- * bgpvpn
  * odl-sfc
  * barometer
- * fds
  * stor4nfv_os
 
 Kubernetes
@@ -98,7 +93,6 @@ Software
  * https://hub.docker.com/r/opnfv/functest-smoke
  * https://hub.docker.com/r/opnfv/functest-benchmarking
  * https://hub.docker.com/r/opnfv/functest-features
- * https://hub.docker.com/r/opnfv/functest-components
  * https://hub.docker.com/r/opnfv/functest-vnf
 
  Functest Docker images (Kubernetes):
@@ -118,42 +112,11 @@ Documents
 Version change
 ==============
 
-New test cases
---------------
-
- * tenantnetwork1
- * tenantnetwork2
- * vmready1
- * vmready2
- * singlevm1
- * singlevm2
- * cinder_test
- * neutron-tempest-plugin-api
- * rally_jobs
- * networking-bgpvpn
- * networking-sfc
- * barbican
- * vmtp
- * shaker
- * tempest_scenario
- * cloudify
- * heat_ims
- * vgpu
-
 Key changes
 -----------
 
- * update test cases and containers to `OpenStack master`_ and to
+ * update testcases and containers to `OpenStack master`_ and to
    `Kubernetes master`_
- * define new scenarios to ease writing testcases vs OpenStack
- * isolate all resources created in different tenants
- * fully remove all OPNFV logics
- * publish new Jenkins jobs
- * support VIO (VMware Integrated OpenStack) and arm64 for Kubernetes
- * reduce Functest Kubernetes image sizes
- * add tempest_full and tempest_scenario in all daily jobs
- * include benchmarking tools such as Vmtp ans Shaker
- * increase functional scope by adding bgpvpn and sfc tempest plugins
 
 .. _`OpenStack master`: https://github.com/openstack/requirements/blob/master/upper-constraints.txt
 .. _`Kubernetes master`: https://github.com/kubernetes/kubernetes
@@ -161,23 +124,20 @@ Key changes
 Key benefits
 ------------
 
- * the enduser can easily build its own toolchains by loading our Jenkins jobs
- * all developpers can easily verify their changes before merge
- * our testcases may be run vs VIM in production
- * all testcases can run in parallel to decrease the overall duration
- * Functest includes most of the OpenStack gate jobs
+ * Functest master is conformed with OpenStack Gates
+ * Functest VNF testcases could be executed in Openstack Gates
 
 Code quality
 ------------
 
- * pylint: ~9.5/10
- * code coverage: ~70%
+ * pylint: 9.94/10
+ * code coverage: 71%
 
 Useful links
 ============
 
  * wiki project page: https://wiki.opnfv.org/display/functest/Opnfv+Functional+Testing
- * Functest git repository: https://git.opnfv.org/cgit/functest
+ * Functest git repository: https://github.com/opnfv/functest
  * Functest CI dashboard: https://build.opnfv.org/ci/view/functest/
  * JIRA dashboard: https://jira.opnfv.org/secure/Dashboard.jspa?selectPageId=10611
  * Functest IRC channel: #opnfv-functest

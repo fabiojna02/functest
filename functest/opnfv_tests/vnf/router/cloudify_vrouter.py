@@ -15,9 +15,7 @@ import logging
 import os
 import time
 
-from cloudify_rest_client.executions import Execution
 import pkg_resources
-import scp
 
 from functest.core import cloudify
 from functest.opnfv_tests.vnf.router import vrouter_base
@@ -35,11 +33,17 @@ class CloudifyVrouter(cloudify.Cloudify):
 
     __logger = logging.getLogger(__name__)
 
-    filename_alt = '/home/opnfv/functest/images/vyos-1.1.7.img'
+    filename_alt = '/home/opnfv/functest/images/vyos-1.1.8-amd64.qcow2'
 
-    flavor_alt_ram = 2048
+    flavor_alt_ram = 1024
     flavor_alt_vcpus = 1
-    flavor_alt_disk = 50
+    flavor_alt_disk = 3
+
+    cop_yaml = ("https://github.com/cloudify-cosmo/cloudify-openstack-plugin/"
+                "releases/download/2.14.7/plugin.yaml")
+    cop_wgn = ("https://github.com/cloudify-cosmo/cloudify-openstack-plugin/"
+               "releases/download/2.14.7/cloudify_openstack_plugin-2.14.7-py27"
+               "-none-linux_x86_64-centos-Core.wgn")
 
     def __init__(self, **kwargs):
         if "case_name" not in kwargs:
@@ -115,16 +119,8 @@ class CloudifyVrouter(cloudify.Cloudify):
         # network creation
         super(CloudifyVrouter, self).execute()
         start_time = time.time()
-        self.__logger.info("Put private keypair in manager")
-        scpc = scp.SCPClient(self.ssh.get_transport())
-        scpc.put(self.key_filename, remote_path='~/cloudify_ims.pem')
-        (_, stdout, stderr) = self.ssh.exec_command(
-            "sudo cp ~/cloudify_ims.pem /etc/cloudify/ && "
-            "sudo chmod 444 /etc/cloudify/cloudify_ims.pem && "
-            "sudo yum install -y gcc python-devel python-cmd2 && "
-            "cfy status")
-        self.__logger.info("output:\n%s", stdout.read())
-        self.__logger.info("error:\n%s", stderr.read())
+        self.put_private_key()
+        self.upload_cfy_plugins(self.cop_yaml, self.cop_wgn)
 
         self.image_alt = self.publish_image_alt()
         self.flavor_alt = self.create_flavor_alt()
@@ -181,8 +177,8 @@ class CloudifyVrouter(cloudify.Cloudify):
             descriptor.get('name'), descriptor.get('name'),
             self.vnf.get('inputs'))
 
-        wait_for_execution(
-            self.cfy_client, get_execution_id(
+        cloudify.wait_for_execution(
+            self.cfy_client, cloudify.get_execution_id(
                 self.cfy_client, descriptor.get('name')),
             self.__logger, timeout=7200)
 
@@ -190,7 +186,7 @@ class CloudifyVrouter(cloudify.Cloudify):
         execution = self.cfy_client.executions.start(
             descriptor.get('name'), 'install')
         # Show execution log
-        execution = wait_for_execution(
+        execution = cloudify.wait_for_execution(
             self.cfy_client, execution, self.__logger)
 
         duration = time.time() - start_time
@@ -206,8 +202,7 @@ class CloudifyVrouter(cloudify.Cloudify):
 
     def test_vnf(self):
         start_time = time.time()
-        testing = vrouter_base.VrouterOnBoardingBase(
-            self.case_name, self.util, self.util_info)
+        testing = vrouter_base.VrouterOnBoardingBase(self.util, self.util_info)
         result, test_result_data = testing.test_vnf()
         duration = time.time() - start_time
         if result:
@@ -221,91 +216,9 @@ class CloudifyVrouter(cloudify.Cloudify):
         return True
 
     def clean(self):
-        try:
-            dep_name = self.vnf['descriptor'].get('name')
-            # kill existing execution
-            self.__logger.info('Deleting the current deployment')
-            exec_list = self.cfy_client.executions.list()
-            for execution in exec_list:
-                if execution['status'] == "started":
-                    try:
-                        self.cfy_client.executions.cancel(
-                            execution['id'], force=True)
-                    except Exception:  # pylint: disable=broad-except
-                        self.__logger.warn("Can't cancel the current exec")
-
-            execution = self.cfy_client.executions.start(
-                dep_name, 'uninstall', parameters=dict(ignore_failure=True))
-
-            wait_for_execution(self.cfy_client, execution, self.__logger)
-            self.cfy_client.deployments.delete(
-                self.vnf['descriptor'].get('name'))
-            self.cfy_client.blueprints.delete(
-                self.vnf['descriptor'].get('name'))
-        except Exception:  # pylint: disable=broad-except
-            self.__logger.exception("Some issue during the undeployment ..")
+        self.kill_existing_execution(self.vnf['descriptor'].get('name'))
         if self.image_alt:
             self.cloud.delete_image(self.image_alt)
         if self.flavor_alt:
             self.orig_cloud.delete_flavor(self.flavor_alt.id)
         super(CloudifyVrouter, self).clean()
-
-
-def wait_for_execution(client, execution, logger, timeout=7200, ):
-    """Wait for a workflow execution on Cloudify Manager."""
-    # if execution already ended - return without waiting
-    if execution.status in Execution.END_STATES:
-        return execution
-
-    if timeout is not None:
-        deadline = time.time() + timeout
-
-    # Poll for execution status and execution logs, until execution ends
-    # and we receive an event of type in WORKFLOW_END_TYPES
-    offset = 0
-    batch_size = 50
-    event_list = []
-    execution_ended = False
-    while True:
-        event_list = client.events.list(
-            execution_id=execution.id, _offset=offset, _size=batch_size,
-            include_logs=True, sort='@timestamp').items
-
-        offset = offset + len(event_list)
-        for event in event_list:
-            logger.debug(event.get('message'))
-
-        if timeout is not None:
-            if time.time() > deadline:
-                raise RuntimeError(
-                    'execution of operation {0} for deployment {1} '
-                    'timed out'.format(execution.workflow_id,
-                                       execution.deployment_id))
-            else:
-                # update the remaining timeout
-                timeout = deadline - time.time()
-
-        if not execution_ended:
-            execution = client.executions.get(execution.id)
-            execution_ended = execution.status in Execution.END_STATES
-
-        if execution_ended:
-            break
-
-        time.sleep(5)
-
-    return execution
-
-
-def get_execution_id(client, deployment_id):
-    """
-    Get the execution id of a env preparation.
-    network, security group, fip, VM creation
-    """
-    executions = client.executions.list(deployment_id=deployment_id)
-    for execution in executions:
-        if execution.workflow_id == 'create_deployment_environment':
-            return execution
-    raise RuntimeError('Failed to get create_deployment_environment '
-                       'workflow execution.'
-                       'Available executions: {0}'.format(executions))

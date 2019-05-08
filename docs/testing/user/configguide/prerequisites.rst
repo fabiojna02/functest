@@ -14,13 +14,6 @@ Several prerequisites are needed for Functest:
     #. An admin/management network created on the SUT
     #. Connectivity from the Jumphost to the SUT public/external network
 
-Some specific SNAPS tests may require a connectivity from the Jumphost to the
-SUT admin/management network but most of the test cases do not. This
-requirement can be changed by overriding the 'interface' attribute
-(OS_INTERFACE) value to 'public' in the credentials file. Another means to
-circumvent this issue would be to change the 'snaps.use_keystone' value from
-True to False.
-
 WARNING: Connectivity from Jumphost is essential and it is of paramount
 importance to make sure it is working before even considering to install
 and run Functest. Make also sure you understand how your networking is
@@ -100,5 +93,3 @@ Jumphost using the 'ping' command using the respective IP address on the
 public/external network for each node in the SUT. The details of how to
 determine the needed IP addresses for each node in the SUT may vary according
 to the used installer and are therefore ommitted here.
-
-.. _`[1]`: https://ask.openstack.org/en/question/68144/keystone-unable-to-use-the-public-endpoint/

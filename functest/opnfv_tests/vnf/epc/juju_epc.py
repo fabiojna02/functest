@@ -19,12 +19,11 @@ import sys
 
 from copy import deepcopy
 import pkg_resources
-import six
-import yaml
 
 from functest.core import singlevm
 from functest.utils import config
 from functest.utils import env
+from functest.utils import functest_utils
 
 __author__ = "Amarendra Meher <amarendra@rebaca.com>"
 __author__ = "Soumaya K Nayek <soumaya.nayek@rebaca.com>"
@@ -80,7 +79,7 @@ class JujuEpc(singlevm.VmReady2):
     flavor_alt_vcpus = 1
     flavor_alt_disk = 10
 
-    juju_timeout = '3600'
+    juju_timeout = '4800'
 
     def __init__(self, **kwargs):
         if "case_name" not in kwargs:
@@ -96,32 +95,42 @@ class JujuEpc(singlevm.VmReady2):
         except Exception:
             raise Exception("VNF config file not found")
         self.config_file = os.path.join(self.case_dir, self.config)
-        self.orchestrator = dict(requirements=get_config(
-            "orchestrator.requirements", self.config_file))
+        self.orchestrator = dict(
+            requirements=functest_utils.get_parameter_from_yaml(
+                "orchestrator.requirements", self.config_file))
 
         self.created_object = []
         self.details['orchestrator'] = dict(
-            name=get_config("orchestrator.name", self.config_file),
-            version=get_config("orchestrator.version", self.config_file),
+            name=functest_utils.get_parameter_from_yaml(
+                "orchestrator.name", self.config_file),
+            version=functest_utils.get_parameter_from_yaml(
+                "orchestrator.version", self.config_file),
             status='ERROR',
             result=''
         )
 
         self.vnf = dict(
-            descriptor=get_config("vnf.descriptor", self.config_file),
-            requirements=get_config("vnf.requirements", self.config_file)
+            descriptor=functest_utils.get_parameter_from_yaml(
+                "vnf.descriptor", self.config_file),
+            requirements=functest_utils.get_parameter_from_yaml(
+                "vnf.requirements", self.config_file)
         )
         self.details['vnf'] = dict(
             descriptor_version=self.vnf['descriptor']['version'],
-            name=get_config("vnf.name", self.config_file),
-            version=get_config("vnf.version", self.config_file),
+            name=functest_utils.get_parameter_from_yaml(
+                "vnf.name", self.config_file),
+            version=functest_utils.get_parameter_from_yaml(
+                "vnf.version", self.config_file),
         )
         self.__logger.debug("VNF configuration: %s", self.vnf)
 
         self.details['test_vnf'] = dict(
-            name=get_config("vnf_test_suite.name", self.config_file),
-            version=get_config("vnf_test_suite.version", self.config_file),
-            tag_name=get_config("vnf_test_suite.tag_name", self.config_file)
+            name=functest_utils.get_parameter_from_yaml(
+                "vnf_test_suite.name", self.config_file),
+            version=functest_utils.get_parameter_from_yaml(
+                "vnf_test_suite.version", self.config_file),
+            tag_name=functest_utils.get_parameter_from_yaml(
+                "vnf_test_suite.tag_name", self.config_file)
         )
 
         self.res_dir = os.path.join(
@@ -130,8 +139,7 @@ class JujuEpc(singlevm.VmReady2):
         try:
             self.public_auth_url = self.get_public_auth_url(self.orig_cloud)
             if not self.public_auth_url.endswith(('v3', 'v3/')):
-                self.public_auth_url = six.moves.urllib.parse.urljoin(
-                    self.public_auth_url, 'v3')
+                self.public_auth_url = "{}/v3".format(self.public_auth_url)
         except Exception:  # pylint: disable=broad-except
             self.public_auth_url = None
         self.sec = None
@@ -139,6 +147,12 @@ class JujuEpc(singlevm.VmReady2):
         self.flavor_alt = None
 
     def check_requirements(self):
+        if not os.path.exists("/src/epc-requirements/go/bin/juju"):
+            self.__logger.warn(
+                "Juju cannot be cross-compiled (arm and arm64) from the time "
+                "being")
+            self.is_skipped = True
+            self.project.clean()
         if env.get('NEW_USER_ROLE').lower() == "admin":
             self.__logger.warn(
                 "Defining NEW_USER_ROLE=admin will easily break the testcase "
@@ -236,6 +250,7 @@ class JujuEpc(singlevm.VmReady2):
                    '--bootstrap-series', 'xenial',
                    '--config', 'network={}'.format(self.network.id),
                    '--config', 'ssl-hostname-verification=false',
+                   '--config', 'external-network={}'.format(self.ext_net.id),
                    '--config', 'use-floating-ip=true',
                    '--config', 'use-default-secgroup=true',
                    '--debug']
@@ -255,14 +270,20 @@ class JujuEpc(singlevm.VmReady2):
     def check_app(self, name='abot-epc-basic', status='active'):
         """Check application status."""
         cmd = ['juju', 'status', '--format', 'short', name]
-        output = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
-        self.__logger.info("%s\n%s", " ".join(cmd), output)
-        ret = re.search(r'(?=workload:({})\))'.format(status), output)
-        if ret:
-            self.__logger.info("%s workload is %s", name, status)
-            return True
-        self.__logger.error("%s workload differs from %s", name, status)
-        return False
+        for i in range(10):
+            output = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+            self.__logger.info("%s\n%s", " ".join(cmd), output)
+            ret = re.search(r'(?=workload:({})\))'.format(status), output)
+            if ret:
+                self.__logger.info("%s workload is %s", name, status)
+                break
+            self.__logger.info(
+                "loop %d: %s workload differs from %s", i + 1, name, status)
+            time.sleep(60)
+        else:
+            self.__logger.error("%s workload differs from %s", name, status)
+            return False
+        return True
 
     def deploy_vnf(self):
         """Deploy ABOT-OAI-EPC."""
@@ -391,29 +412,6 @@ class JujuEpc(singlevm.VmReady2):
         if self.flavor_alt:
             self.orig_cloud.delete_flavor(self.flavor_alt.id)
         super(JujuEpc, self).clean()
-
-
-# ----------------------------------------------------------
-#
-#               YAML UTILS
-#
-# -----------------------------------------------------------
-def get_config(parameter, file_path):
-    """
-    Returns the value of a given parameter in file.yaml
-    parameter must be given in string format with dots
-    Example: general.openstack.image_name
-    """
-    with open(file_path) as config_file:
-        file_yaml = yaml.safe_load(config_file)
-    config_file.close()
-    value = file_yaml
-    for element in parameter.split("."):
-        value = value.get(element)
-        if value is None:
-            raise ValueError("The parameter %s is not defined in"
-                             " reporting.yaml" % parameter)
-    return value
 
 
 def sig_test_format(sig_test):

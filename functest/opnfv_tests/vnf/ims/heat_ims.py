@@ -15,8 +15,9 @@ import logging
 import os
 import re
 import time
-import yaml
+import tempfile
 
+import paramiko
 import pkg_resources
 from xtesting.core import testcase
 
@@ -24,6 +25,7 @@ from functest.core import singlevm
 from functest.opnfv_tests.vnf.ims import clearwater
 from functest.utils import config
 from functest.utils import env
+from functest.utils import functest_utils
 
 __author__ = "Valentin Boucher <valentin.boucher@kontron.com>"
 
@@ -37,13 +39,19 @@ class HeatIms(singlevm.VmReady2):
     filename = ('/home/opnfv/functest/images/'
                 'ubuntu-14.04-server-cloudimg-amd64-disk1.img')
 
-    flavor_ram = 2048
-    flavor_vcpus = 2
-    flavor_disk = 25
+    flavor_ram = 1024
+    flavor_vcpus = 1
+    flavor_disk = 3
 
     quota_security_group = 20
     quota_security_group_rule = 100
     quota_port = 50
+
+    parameters = {
+        'private_mgmt_net_cidr': '192.168.100.0/24',
+        'private_mgmt_net_gateway': '192.168.100.254',
+        'private_mgmt_net_pool_start': '192.168.100.1',
+        'private_mgmt_net_pool_end': '192.168.100.253'}
 
     def __init__(self, **kwargs):
         """Initialize HeatIms testcase object."""
@@ -63,19 +71,27 @@ class HeatIms(singlevm.VmReady2):
         config_file = os.path.join(self.case_dir, self.config)
 
         self.vnf = dict(
-            descriptor=get_config("vnf.descriptor", config_file),
-            parameters=get_config("vnf.inputs", config_file)
+            descriptor=functest_utils.get_parameter_from_yaml(
+                "vnf.descriptor", config_file),
+            parameters=functest_utils.get_parameter_from_yaml(
+                "vnf.inputs", config_file)
         )
         self.details['vnf'] = dict(
             descriptor_version=self.vnf['descriptor']['version'],
-            name=get_config("vnf.name", config_file),
-            version=get_config("vnf.version", config_file),
+            name=functest_utils.get_parameter_from_yaml(
+                "vnf.name", config_file),
+            version=functest_utils.get_parameter_from_yaml(
+                "vnf.version", config_file),
         )
         self.__logger.debug("VNF configuration: %s", self.vnf)
         self.keypair = None
         self.stack = None
         self.clearwater = None
         self.role = None
+        (_, self.key_filename) = tempfile.mkstemp()
+
+    def create_network_resources(self):
+        pass
 
     def execute(self):
         # pylint: disable=too-many-locals,too-many-statements
@@ -97,9 +113,11 @@ class HeatIms(singlevm.VmReady2):
             domain=self.project.domain.id)
         self.keypair = self.cloud.create_keypair(
             '{}-kp_{}'.format(self.case_name, self.guid))
-        self.__logger.debug("keypair: %s", self.keypair)
+        self.__logger.info("keypair:\n%s", self.keypair.private_key)
+        with open(self.key_filename, 'w') as private_key_file:
+            private_key_file.write(self.keypair.private_key)
 
-        if (self.deploy_vnf() and self.test_vnf()):
+        if self.deploy_vnf() and self.test_vnf():
             self.result = 100
             return 0
         self.result = 1/3 * 100
@@ -131,6 +149,22 @@ class HeatIms(singlevm.VmReady2):
             self.stop_time = time.time()
         return status
 
+    def _monit(self, username="ubuntu", timeout=60):
+        servers = self.cloud.list_servers(detailed=True)
+        self.__logger.debug("servers: %s", servers)
+        for server in servers:
+            if 'ns' in server.name:
+                break
+            self.__logger.info("server:\n%s", server.name)
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.client.AutoAddPolicy())
+            ssh.connect(
+                server.public_v4, username=username,
+                key_filename=self.key_filename, timeout=timeout)
+            (_, stdout, _) = ssh.exec_command('sudo monit summary')
+            self.__logger.info("output:\n%s", stdout.read())
+            ssh.close()
+
     def deploy_vnf(self):
         """Deploy Clearwater IMS."""
         start_time = time.time()
@@ -138,12 +172,11 @@ class HeatIms(singlevm.VmReady2):
         parameters = self.vnf['parameters']
 
         parameters['public_mgmt_net_id'] = self.ext_net.id
-        parameters['public_sig_net_id'] = self.ext_net.id
         parameters['flavor'] = self.flavor.name
         parameters['image'] = self.image.name
         parameters['key_name'] = self.keypair.name
         parameters['external_mgmt_dns_ip'] = env.get('NAMESERVER')
-        parameters['external_sig_dns_ip'] = env.get('NAMESERVER')
+        parameters.update(self.parameters)
 
         self.__logger.info("Create Heat Stack")
         self.stack = self.cloud.create_stack(
@@ -152,11 +185,13 @@ class HeatIms(singlevm.VmReady2):
             wait=True, **parameters)
         self.__logger.debug("stack: %s", self.stack)
 
+        self._monit()
+
         servers = self.cloud.list_servers(detailed=True)
         self.__logger.debug("servers: %s", servers)
         for server in servers:
             if not self.check_regex_in_console(
-                    server.name, regex='Cloud-init .* finished at ', loop=60):
+                    server.name, regex='Cloud-init .* finished at ', loop=1):
                 return False
             if 'ellis' in server.name:
                 self.__logger.debug("server: %s", server)
@@ -169,7 +204,7 @@ class HeatIms(singlevm.VmReady2):
         # an infrastructure orchestrator so when Heat say "stack created"
         # it means that all OpenStack ressources are created but not that
         # Clearwater are up and ready (Cloud-Init script still running)
-        self.clearwater.availability_check_by_creating_numbers()
+        self.clearwater.availability_check()
 
         duration = time.time() - start_time
 
@@ -181,34 +216,20 @@ class HeatIms(singlevm.VmReady2):
     def test_vnf(self):
         """Run test on clearwater ims instance."""
         start_time = time.time()
-
         outputs = self.cloud.get_stack(self.stack.id).outputs
         self.__logger.debug("stack outputs: %s", outputs)
         dns_ip = re.findall(r'[0-9]+(?:\.[0-9]+){3}', str(outputs))[0]
-
         if not dns_ip:
             return False
-
-        short_result = self.clearwater.run_clearwater_live_test(
-            dns_ip=dns_ip,
-            public_domain=self.vnf['parameters']["zone"])
+        short_result, vnf_test_rate = self.clearwater.run_clearwater_live_test(
+            dns_ip=dns_ip, public_domain=self.vnf['parameters']["zone"])
         duration = time.time() - start_time
         self.__logger.info(short_result)
-        self.details['test_vnf'] = dict(result=short_result,
-                                        duration=duration)
-        try:
-            vnf_test_rate = short_result['passed'] / (
-                short_result['total'] - short_result['skipped'])
-            # orchestrator + vnf + test_vnf
-            self.result += vnf_test_rate / 3 * 100
-        except ZeroDivisionError:
-            self.__logger.error("No test has been executed")
+        self.details['test_vnf'] = dict(result=short_result, duration=duration)
+        self.result += vnf_test_rate / 3 * 100
+        if vnf_test_rate == 0:
             self.details['test_vnf'].update(status='FAIL')
-            return False
-        except Exception:  # pylint: disable=broad-except
-            self.__logger.exception("Cannot calculate results")
-            self.details['test_vnf'].update(status='FAIL')
-            return False
+        self._monit()
         return True if vnf_test_rate > 0 else False
 
     def clean(self):
@@ -225,28 +246,3 @@ class HeatIms(singlevm.VmReady2):
         super(HeatIms, self).clean()
         if self.role:
             self.orig_cloud.delete_role(self.role.id)
-
-
-# ----------------------------------------------------------
-#
-#               YAML UTILS
-#
-# -----------------------------------------------------------
-def get_config(parameter, file_path):
-    """
-    Get config parameter.
-
-    Returns the value of a given parameter in file.yaml
-    parameter must be given in string format with dots
-    Example: general.openstack.image_name
-    """
-    with open(file_path) as config_file:
-        file_yaml = yaml.safe_load(config_file)
-    config_file.close()
-    value = file_yaml
-    for element in parameter.split("."):
-        value = value.get(element)
-        if value is None:
-            raise ValueError("The parameter %s is not defined in"
-                             " reporting.yaml" % parameter)
-    return value

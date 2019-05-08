@@ -227,12 +227,13 @@ class VmReady1(tenantnetwork.TenantNetwork1):
             console = self.cloud.get_server_console(name)
             self.__logger.debug("console: \n%s", console)
             if re.search(regex, console):
-                self.__logger.debug("regex found: ''%s' in console", regex)
+                self.__logger.debug(
+                    "regex found: '%s' in console\n%s", regex, console)
                 return True
             else:
                 self.__logger.debug(
-                    "try %s: cannot find regex '%s' in console",
-                    iloop + 1, regex)
+                    "try %s: cannot find regex '%s' in console\n%s",
+                    iloop + 1, regex, console)
                 time.sleep(10)
         self.__logger.error("cannot find regex '%s' in console", regex)
         return False
@@ -353,7 +354,7 @@ class SingleVm1(VmReady1):
         self.keypair = self.cloud.create_keypair(
             '{}-kp_{}'.format(self.case_name, self.guid))
         self.__logger.debug("keypair: %s", self.keypair)
-        self.__logger.debug("private_key: %s", self.keypair.private_key)
+        self.__logger.debug("private_key:\n%s", self.keypair.private_key)
         with open(self.key_filename, 'w') as private_key_file:
             private_key_file.write(self.keypair.private_key)
         self.sec = self.cloud.create_security_group(

@@ -17,6 +17,7 @@ from xtesting.utils import env
 INPUTS = {
     'EXTERNAL_NETWORK': None,
     'CI_LOOP': env.INPUTS['CI_LOOP'],
+    'DEBUG': env.INPUTS['DEBUG'],
     'DEPLOY_SCENARIO': env.INPUTS['DEPLOY_SCENARIO'],
     'INSTALLER_TYPE': env.INPUTS['INSTALLER_TYPE'],
     'SDN_CONTROLLER_IP': None,
@@ -36,7 +37,8 @@ INPUTS = {
     'FLAVOR_EXTRA_SPECS': '',
     'NAMESERVER': '8.8.8.8',
     'NEW_USER_ROLE': 'Member',
-    'USE_DYNAMIC_CREDENTIALS': 'True'
+    'USE_DYNAMIC_CREDENTIALS': 'True',
+    'BLOCK_MIGRATION': 'True'
 }
 
 
