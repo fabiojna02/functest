@@ -29,7 +29,6 @@ import tempfile
 import time
 import yaml
 
-import six
 from xtesting.core import testcase
 
 from functest.core import singlevm
@@ -108,7 +107,7 @@ class Vmtp(singlevm.VmReady2):
         output = subprocess.check_output(cmd)
         self.__logger.info("%s\n%s", " ".join(cmd), output)
         with open(self.config, "w+") as conf:
-            vmtp_conf = yaml.load(output)
+            vmtp_conf = yaml.full_load(output)
             vmtp_conf["private_key_file"] = self.privkey_filename
             vmtp_conf["public_key_file"] = self.pubkey_filename
             vmtp_conf["image_name"] = str(self.image.name)
@@ -138,8 +137,7 @@ class Vmtp(singlevm.VmReady2):
             OS_PROJECT_ID=self.project.project.id,
             OS_PASSWORD=self.project.password)
         if not new_env["OS_AUTH_URL"].endswith(('v3', 'v3/')):
-            new_env["OS_AUTH_URL"] = six.moves.urllib.parse.urljoin(
-                new_env["OS_AUTH_URL"], 'v3')
+            new_env["OS_AUTH_URL"] = "{}/v3".format(new_env["OS_AUTH_URL"])
         try:
             del new_env['OS_TENANT_NAME']
             del new_env['OS_TENANT_ID']

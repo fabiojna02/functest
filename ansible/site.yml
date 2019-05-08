@@ -1,0 +1,88 @@
+---
+- hosts:
+    - 127.0.0.1
+  roles:
+    - role: collivier.xtesting
+      project: functest
+      gerrit_project: functest
+      builds:
+        dependencies:
+          - repo: _
+            dport:
+            container: alpine
+            tag: 3.9
+        steps:
+          - name: build opnfv/functest-core
+            containers:
+              - name: functest-core
+                ref_arg: BRANCH
+                path: docker/core
+          - name: build opnfv/functest-tempest
+            containers:
+              - name: functest-tempest
+                ref_arg: BRANCH
+                path: docker/tempest
+          - name: build containers
+            containers:
+              - name: functest-healthcheck
+                ref_arg: BRANCH
+                path: docker/healthcheck
+              - name: functest-smoke
+                ref_arg: BRANCH
+                path: docker/smoke
+              - name: functest-benchmarking
+                ref_arg: BRANCH
+                path: docker/benchmarking
+              - name: functest-vnf
+                ref_arg:
+                path: docker/vnf
+              - name: functest-features
+                ref_arg: BRANCH
+                path: docker/features
+      suites:
+        - container: functest-healthcheck
+          tests:
+            - connection_check
+            - tenantnetwork1
+            - tenantnetwork2
+            - vmready1
+            - vmready2
+            - singlevm1
+            - singlevm2
+            - vping_ssh
+            - vping_userdata
+            - cinder_test
+            - odl
+            - tempest_smoke
+        - container: functest-smoke
+          tests:
+            - neutron-tempest-plugin-api
+            - rally_sanity
+            - refstack_defcore
+            - tempest_full
+            - tempest_scenario
+            - patrole
+            - neutron_trunk
+            - networking-bgpvpn
+            - networking-sfc
+            - barbican
+        - container: functest-benchmarking
+          tests:
+            - rally_full
+            - rally_jobs
+            - vmtp
+            - shaker
+        - container: functest-vnf
+          tests:
+            - cloudify
+            - cloudify_ims
+            - heat_ims
+            - vyos_vrouter
+            - juju_epc
+        - container: functest-features
+          tests:
+            - doctor-notification
+            - functest-odl-sfc
+            - barometercollectd
+            - vgpu
+            - stor4nfv_os

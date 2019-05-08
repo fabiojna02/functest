@@ -16,7 +16,7 @@ import logging
 from functest.core import singlevm
 
 
-class vGPU(singlevm.SingleVm2):
+class VGPU(singlevm.SingleVm2):
     """OpenStack vGPU Test Case."""
 
     __logger = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ class vGPU(singlevm.SingleVm2):
         """Initialize vGPU testcase object."""
         if "case_name" not in kwargs:
             kwargs["case_name"] = "vgpu"
-        super(vGPU, self).__init__(**kwargs)
+        super(VGPU, self).__init__(**kwargs)
 
     def execute(self):
         """
@@ -49,6 +49,5 @@ class vGPU(singlevm.SingleVm2):
                 'VGA compatible controller: Nvidia' in lspci_output):
             self.__logger.info("The VM have a vGPU")
             return 0
-        else:
-            self.__logger.error("The VM haven't any vGPU")
-            return 1
+        self.__logger.error("The VM haven't any vGPU")
+        return 1

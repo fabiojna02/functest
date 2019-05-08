@@ -20,6 +20,8 @@ This classes could be reused by more complexed scenarios (Single VM)
 
 import logging
 import os
+import random
+import string
 import time
 import uuid
 
@@ -46,7 +48,6 @@ class NewProject(object):
         self.user = None
         self.password = None
         self.domain = None
-        self.role = None
         self.role_name = None
         self.default_member = env.get('NEW_USER_ROLE')
 
@@ -54,7 +55,8 @@ class NewProject(object):
         """Create projects/users"""
         assert self.orig_cloud
         assert self.case_name
-        self.password = str(uuid.uuid4())
+        self.password = ''.join(random.choice(
+            string.ascii_letters + string.digits) for _ in range(30))
         self.domain = self.orig_cloud.get_domain(
             name_or_id=self.orig_cloud.auth.get(
                 "project_domain_name", "Default"))
@@ -78,9 +80,9 @@ class NewProject(object):
                 raise Exception("Cannot detect {}".format(self.default_member))
         except Exception:  # pylint: disable=broad-except
             self.__logger.info("Creating default role %s", self.default_member)
-            self.role = self.orig_cloud.create_role(self.default_member)
-            self.role_name = self.role.name
-            self.__logger.debug("role: %s", self.role)
+            role = self.orig_cloud.create_role(self.default_member)
+            self.role_name = role.name
+            self.__logger.debug("role: %s", role)
         self.orig_cloud.grant_role(
             self.role_name, user=self.user.id, project=self.project.id,
             domain=self.domain.id)
@@ -96,6 +98,21 @@ class NewProject(object):
             cloud_config=osconfig.get_one_cloud())
         self.__logger.debug("new cloud %s", self.cloud.auth)
 
+    def get_environ(self):
+        "Get new environ"
+        environ = dict(
+            os.environ,
+            OS_USERNAME=self.user.name,
+            OS_PROJECT_NAME=self.project.name,
+            OS_PROJECT_ID=self.project.id,
+            OS_PASSWORD=self.password)
+        try:
+            del environ['OS_TENANT_NAME']
+            del environ['OS_TENANT_ID']
+        except Exception:  # pylint: disable=broad-except
+            pass
+        return environ
+
     def clean(self):
         """Remove projects/users"""
         try:
@@ -104,8 +121,6 @@ class NewProject(object):
                 self.orig_cloud.delete_user(self.user.id)
             if self.project:
                 self.orig_cloud.delete_project(self.project.id)
-            if self.role:
-                self.orig_cloud.delete_role(self.role.id)
             secgroups = self.orig_cloud.list_security_groups(
                 filters={'name': 'default',
                          'project_id': self.project.id})

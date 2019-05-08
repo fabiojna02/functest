@@ -12,6 +12,7 @@
 
 from __future__ import division
 
+import json
 import logging
 import os
 import re
@@ -19,12 +20,13 @@ import shutil
 import subprocess
 import time
 
+import pkg_resources
 from six.moves import configparser
 from xtesting.core import testcase
 import yaml
 
 from functest.core import singlevm
-from functest.opnfv_tests.openstack.tempest import conf_utils
+from functest.opnfv_tests.openstack.rally import rally
 from functest.utils import config
 from functest.utils import env
 from functest.utils import functest_utils
@@ -33,11 +35,21 @@ LOGGER = logging.getLogger(__name__)
 
 
 class TempestCommon(singlevm.VmReady2):
-    # pylint: disable=too-many-instance-attributes
+    # pylint: disable=too-many-instance-attributes,too-many-public-methods
     """TempestCommon testcases implementation class."""
 
     visibility = 'public'
     filename_alt = '/home/opnfv/functest/images/cirros-0.4.0-x86_64-disk.img'
+    shared_network = True
+    TEMPEST_CONF_YAML = pkg_resources.resource_filename(
+        'functest',
+        'opnfv_tests/openstack/tempest/custom_tests/tempest_conf.yaml')
+    TEMPEST_CUSTOM = pkg_resources.resource_filename(
+        'functest',
+        'opnfv_tests/openstack/tempest/custom_tests/test_list.txt')
+    TEMPEST_BLACKLIST = pkg_resources.resource_filename(
+        'functest',
+        'opnfv_tests/openstack/tempest/custom_tests/blacklist.yaml')
 
     def __init__(self, **kwargs):
         if "case_name" not in kwargs:
@@ -59,28 +71,10 @@ class TempestCommon(singlevm.VmReady2):
         self.orig_cloud.grant_role(
             self.role_name, user=self.project.user.id,
             domain=self.project.domain.id)
-        environ = dict(
-            os.environ,
-            OS_USERNAME=self.project.user.name,
-            OS_PROJECT_NAME=self.project.project.name,
-            OS_PROJECT_ID=self.project.project.id,
-            OS_PASSWORD=self.project.password)
-        try:
-            del environ['OS_TENANT_NAME']
-            del environ['OS_TENANT_ID']
-        except Exception:  # pylint: disable=broad-except
-            pass
-        self.deployment_id = conf_utils.create_rally_deployment(
-            environ=environ)
-        if not self.deployment_id:
-            raise Exception("Deployment create failed")
-        self.verifier_id = conf_utils.create_verifier()
-        if not self.verifier_id:
-            raise Exception("Verifier create failed")
-        self.verifier_repo_dir = conf_utils.get_verifier_repo_dir(
-            self.verifier_id)
-        self.deployment_dir = conf_utils.get_verifier_deployment_dir(
-            self.verifier_id, self.deployment_id)
+        self.deployment_id = None
+        self.verifier_id = None
+        self.verifier_repo_dir = None
+        self.deployment_dir = None
         self.verification_id = None
         self.res_dir = os.path.join(
             getattr(config.CONF, 'dir_results'), self.case_name)
@@ -100,9 +94,7 @@ class TempestCommon(singlevm.VmReady2):
                 'neutron_extensions']
         except Exception:  # pylint: disable=broad-except
             pass
-
-    def create_network_resources(self):
-        pass
+        self.deny_skipping = kwargs.get("deny_skipping", False)
 
     def check_services(self):
         """Check the mandatory services."""
@@ -174,17 +166,181 @@ class TempestCommon(singlevm.VmReady2):
         shutil.copyfile(conf_file,
                         os.path.join(res_dir, 'tempest.conf'))
 
+    @staticmethod
+    def create_verifier():
+        """Create new verifier"""
+        LOGGER.info("Create verifier from existing repo...")
+        cmd = ['rally', 'verify', 'delete-verifier',
+               '--id', str(getattr(config.CONF, 'tempest_verifier_name')),
+               '--force']
+        try:
+            output = subprocess.check_output(cmd)
+            LOGGER.info("%s\n%s", " ".join(cmd), output)
+        except subprocess.CalledProcessError:
+            pass
+
+        cmd = ['rally', 'verify', 'create-verifier',
+               '--source', str(getattr(config.CONF, 'dir_repo_tempest')),
+               '--name', str(getattr(config.CONF, 'tempest_verifier_name')),
+               '--type', 'tempest', '--system-wide']
+        output = subprocess.check_output(cmd)
+        LOGGER.info("%s\n%s", " ".join(cmd), output)
+        return TempestCommon.get_verifier_id()
+
+    @staticmethod
+    def get_verifier_id():
+        """
+        Returns verifier id for current Tempest
+        """
+        cmd = ("rally verify list-verifiers | awk '/" +
+               getattr(config.CONF, 'tempest_verifier_name') +
+               "/ {print $2}'")
+        proc = subprocess.Popen(cmd, shell=True,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT)
+        verifier_uuid = proc.stdout.readline().rstrip()
+        return verifier_uuid
+
+    @staticmethod
+    def get_verifier_repo_dir(verifier_id):
+        """
+        Returns installed verifier repo directory for Tempest
+        """
+        return os.path.join(getattr(config.CONF, 'dir_rally_inst'),
+                            'verification',
+                            'verifier-{}'.format(verifier_id),
+                            'repo')
+
+    @staticmethod
+    def get_verifier_deployment_dir(verifier_id, deployment_id):
+        """
+        Returns Rally deployment directory for current verifier
+        """
+        return os.path.join(getattr(config.CONF, 'dir_rally_inst'),
+                            'verification',
+                            'verifier-{}'.format(verifier_id),
+                            'for-deployment-{}'.format(deployment_id))
+
+    @staticmethod
+    def update_tempest_conf_file(conf_file, rconfig):
+        """Update defined paramters into tempest config file"""
+        with open(TempestCommon.TEMPEST_CONF_YAML) as yfile:
+            conf_yaml = yaml.safe_load(yfile)
+        if conf_yaml:
+            sections = rconfig.sections()
+            for section in conf_yaml:
+                if section not in sections:
+                    rconfig.add_section(section)
+                sub_conf = conf_yaml.get(section)
+                for key, value in sub_conf.items():
+                    rconfig.set(section, key, value)
+
+        with open(conf_file, 'wb') as config_file:
+            rconfig.write(config_file)
+
+    @staticmethod
+    def configure_tempest_update_params(
+            tempest_conf_file, image_id=None, flavor_id=None,
+            compute_cnt=1, image_alt_id=None, flavor_alt_id=None,
+            admin_role_name='admin', cidr='192.168.120.0/24',
+            domain_id='default'):
+        # pylint: disable=too-many-branches,too-many-arguments,
+        # too-many-statements
+        """
+        Add/update needed parameters into tempest.conf file
+        """
+        LOGGER.debug("Updating selected tempest.conf parameters...")
+        rconfig = configparser.RawConfigParser()
+        rconfig.read(tempest_conf_file)
+        rconfig.set(
+            'compute', 'volume_device_name', env.get('VOLUME_DEVICE_NAME'))
+        if image_id is not None:
+            rconfig.set('compute', 'image_ref', image_id)
+        if image_alt_id is not None:
+            rconfig.set('compute', 'image_ref_alt', image_alt_id)
+        if flavor_id is not None:
+            rconfig.set('compute', 'flavor_ref', flavor_id)
+        if flavor_alt_id is not None:
+            rconfig.set('compute', 'flavor_ref_alt', flavor_alt_id)
+        if compute_cnt > 1:
+            # enable multinode tests
+            rconfig.set('compute', 'min_compute_nodes', compute_cnt)
+            rconfig.set('compute-feature-enabled', 'live_migration', True)
+        filters = ['RetryFilter', 'AvailabilityZoneFilter', 'ComputeFilter',
+                   'ComputeCapabilitiesFilter', 'ImagePropertiesFilter',
+                   'ServerGroupAntiAffinityFilter',
+                   'ServerGroupAffinityFilter']
+        rconfig.set(
+            'compute-feature-enabled', 'scheduler_available_filters',
+            functest_utils.convert_list_to_ini(filters))
+        if os.environ.get('OS_REGION_NAME'):
+            rconfig.set('identity', 'region', os.environ.get('OS_REGION_NAME'))
+        if env.get("NEW_USER_ROLE").lower() != "member":
+            rconfig.set(
+                'auth', 'tempest_roles',
+                functest_utils.convert_list_to_ini([env.get("NEW_USER_ROLE")]))
+        if not json.loads(env.get("USE_DYNAMIC_CREDENTIALS").lower()):
+            rconfig.set('auth', 'use_dynamic_credentials', False)
+            account_file = os.path.join(
+                getattr(config.CONF, 'dir_functest_data'), 'accounts.yaml')
+            assert os.path.exists(
+                account_file), "{} doesn't exist".format(account_file)
+            rconfig.set('auth', 'test_accounts_file', account_file)
+        rconfig.set('identity', 'auth_version', 'v3')
+        rconfig.set('identity', 'admin_role', admin_role_name)
+        rconfig.set('identity', 'default_domain_id', domain_id)
+        if not rconfig.has_section('network'):
+            rconfig.add_section('network')
+        rconfig.set('network', 'default_network', cidr)
+        rconfig.set('network', 'project_network_cidr', cidr)
+        rconfig.set('network', 'project_networks_reachable', False)
+        rconfig.set(
+            'identity', 'v3_endpoint_type',
+            os.environ.get('OS_INTERFACE', 'public'))
+
+        sections = rconfig.sections()
+        services_list = [
+            'compute', 'volume', 'image', 'network', 'data-processing',
+            'object-storage', 'orchestration']
+        for service in services_list:
+            if service not in sections:
+                rconfig.add_section(service)
+            rconfig.set(service, 'endpoint_type',
+                        os.environ.get('OS_INTERFACE', 'public'))
+
+        LOGGER.debug('Add/Update required params defined in tempest_conf.yaml '
+                     'into tempest.conf file')
+        TempestCommon.update_tempest_conf_file(tempest_conf_file, rconfig)
+
+    @staticmethod
+    def configure_verifier(deployment_dir):
+        """
+        Execute rally verify configure-verifier, which generates tempest.conf
+        """
+        cmd = ['rally', 'verify', 'configure-verifier', '--reconfigure',
+               '--id', str(getattr(config.CONF, 'tempest_verifier_name'))]
+        output = subprocess.check_output(cmd)
+        LOGGER.info("%s\n%s", " ".join(cmd), output)
+
+        LOGGER.debug("Looking for tempest.conf file...")
+        tempest_conf_file = os.path.join(deployment_dir, "tempest.conf")
+        if not os.path.isfile(tempest_conf_file):
+            LOGGER.error("Tempest configuration file %s NOT found.",
+                         tempest_conf_file)
+            return None
+        return tempest_conf_file
+
     def generate_test_list(self, **kwargs):
         """Generate test list based on the test mode."""
         LOGGER.debug("Generating test case list...")
         self.backup_tempest_config(self.conf_file, '/etc')
         if kwargs.get('mode') == 'custom':
-            if os.path.isfile(conf_utils.TEMPEST_CUSTOM):
+            if os.path.isfile(self.TEMPEST_CUSTOM):
                 shutil.copyfile(
-                    conf_utils.TEMPEST_CUSTOM, self.list)
+                    self.TEMPEST_CUSTOM, self.list)
             else:
                 raise Exception("Tempest test list file %s NOT found."
-                                % conf_utils.TEMPEST_CUSTOM)
+                                % self.TEMPEST_CUSTOM)
         else:
             testr_mode = kwargs.get(
                 'mode', r'^tempest\.(api|scenario).*\[.*\bsmoke\b.*\]$')
@@ -207,7 +363,7 @@ class TempestCommon(singlevm.VmReady2):
             deploy_scenario = env.get('DEPLOY_SCENARIO')
             if bool(deploy_scenario):
                 # if DEPLOY_SCENARIO is set we read the file
-                black_list_file = open(conf_utils.TEMPEST_BLACKLIST)
+                black_list_file = open(self.TEMPEST_BLACKLIST)
                 black_list_yaml = yaml.safe_load(black_list_file)
                 black_list_file.close()
                 for item in black_list_yaml:
@@ -280,7 +436,7 @@ class TempestCommon(singlevm.VmReady2):
                     return
 
             with open(os.path.join(self.res_dir,
-                                   "tempest.log"), 'r') as logfile:
+                                   "rally.log"), 'r') as logfile:
                 output = logfile.read()
 
             success_testcases = []
@@ -292,7 +448,7 @@ class TempestCommon(singlevm.VmReady2):
                                     output):
                 failed_testcases.append(match)
             skipped_testcases = []
-            for match in re.findall(r'.*\{\d{1,2}\} (.*?) \.{3} skip:',
+            for match in re.findall(r'.*\{\d{1,2}\} (.*?) \.{3} skip(?::| )',
                                     output):
                 skipped_testcases.append(match)
 
@@ -308,14 +464,6 @@ class TempestCommon(singlevm.VmReady2):
 
         LOGGER.info("Tempest %s success_rate is %s%%",
                     self.case_name, self.result)
-
-    def generate_report(self):
-        """Generate verification report."""
-        html_file = os.path.join(self.res_dir,
-                                 "tempest-report.html")
-        cmd = ["rally", "verify", "report", "--type", "html", "--uuid",
-               self.verification_id, "--to", str(html_file)]
-        subprocess.check_output(cmd)
 
     def update_rally_regex(self, rally_conf='/etc/rally/rally.conf'):
         """Set image name as tempest img_name_regex"""
@@ -347,6 +495,8 @@ class TempestCommon(singlevm.VmReady2):
             os.makedirs(self.res_dir)
         rconfig = configparser.RawConfigParser()
         rconfig.read(rally_conf)
+        rconfig.set('DEFAULT', 'debug', True)
+        rconfig.set('DEFAULT', 'use_stderr', False)
         rconfig.set('DEFAULT', 'log-file', 'rally.log')
         rconfig.set('DEFAULT', 'log_dir', self.res_dir)
         with open(rally_conf, 'wb') as config_file:
@@ -361,11 +511,36 @@ class TempestCommon(singlevm.VmReady2):
             rconfig.remove_option('openstack', 'img_name_regex')
         if rconfig.has_option('openstack', 'swift_operator_role'):
             rconfig.remove_option('openstack', 'swift_operator_role')
+        if rconfig.has_option('DEFAULT', 'use_stderr'):
+            rconfig.remove_option('DEFAULT', 'use_stderr')
+        if rconfig.has_option('DEFAULT', 'debug'):
+            rconfig.remove_option('DEFAULT', 'debug')
         if rconfig.has_option('DEFAULT', 'log-file'):
             rconfig.remove_option('DEFAULT', 'log-file')
         if rconfig.has_option('DEFAULT', 'log_dir'):
             rconfig.remove_option('DEFAULT', 'log_dir')
         with open(rally_conf, 'wb') as config_file:
+            rconfig.write(config_file)
+
+    def update_network_section(self):
+        """Update network section in tempest.conf"""
+        rconfig = configparser.RawConfigParser()
+        rconfig.read(self.conf_file)
+        if not rconfig.has_section('network'):
+            rconfig.add_section('network')
+        rconfig.set('network', 'public_network_id', self.ext_net.id)
+        rconfig.set('network', 'floating_network_name', self.ext_net.name)
+        with open(self.conf_file, 'wb') as config_file:
+            rconfig.write(config_file)
+
+    def update_compute_section(self):
+        """Update compute section in tempest.conf"""
+        rconfig = configparser.RawConfigParser()
+        rconfig.read(self.conf_file)
+        if not rconfig.has_section('compute'):
+            rconfig.add_section('compute')
+        rconfig.set('compute', 'fixed_network_name', self.network.name)
+        with open(self.conf_file, 'wb') as config_file:
             rconfig.write(config_file)
 
     def update_scenario_section(self):
@@ -402,16 +577,28 @@ class TempestCommon(singlevm.VmReady2):
         """
         if not os.path.exists(self.res_dir):
             os.makedirs(self.res_dir)
+        self.deployment_id = rally.RallyBase.create_rally_deployment(
+            environ=self.project.get_environ())
+        if not self.deployment_id:
+            raise Exception("Deployment create failed")
+        self.verifier_id = self.create_verifier()
+        if not self.verifier_id:
+            raise Exception("Verifier create failed")
+        self.verifier_repo_dir = self.get_verifier_repo_dir(
+            self.verifier_id)
+        self.deployment_dir = self.get_verifier_deployment_dir(
+            self.verifier_id, self.deployment_id)
+
         compute_cnt = len(self.orig_cloud.list_hypervisors())
 
         self.image_alt = self.publish_image_alt()
         self.flavor_alt = self.create_flavor_alt()
         LOGGER.debug("flavor: %s", self.flavor_alt)
 
-        self.conf_file = conf_utils.configure_verifier(self.deployment_dir)
+        self.conf_file = self.configure_verifier(self.deployment_dir)
         if not self.conf_file:
             raise Exception("Tempest verifier configuring failed")
-        conf_utils.configure_tempest_update_params(
+        self.configure_tempest_update_params(
             self.conf_file,
             image_id=self.image.id,
             flavor_id=self.flavor.id,
@@ -420,6 +607,8 @@ class TempestCommon(singlevm.VmReady2):
             flavor_alt_id=self.flavor_alt.id,
             admin_role_name=self.role_name, cidr=self.cidr,
             domain_id=self.project.domain.id)
+        self.update_network_section()
+        self.update_compute_section()
         self.update_scenario_section()
         self.backup_tempest_config(self.conf_file, self.res_dir)
 
@@ -439,7 +628,12 @@ class TempestCommon(singlevm.VmReady2):
             self.apply_tempest_blacklist()
             self.run_verifier_tests(**kwargs)
             self.parse_verifier_result()
-            self.generate_report()
+            rally.RallyBase.verify_report(
+                os.path.join(self.res_dir, "tempest-report.html"),
+                self.verification_id)
+            rally.RallyBase.verify_report(
+                os.path.join(self.res_dir, "tempest-report.xml"),
+                self.verification_id, "junit-xml")
             res = testcase.TestCase.EX_OK
         except Exception:  # pylint: disable=broad-except
             LOGGER.exception('Error with run')
@@ -458,3 +652,10 @@ class TempestCommon(singlevm.VmReady2):
         if self.flavor_alt:
             self.orig_cloud.delete_flavor(self.flavor_alt.id)
         super(TempestCommon, self).clean()
+
+    def is_successful(self):
+        """The overall result of the test."""
+        skips = self.details.get("skipped_number", 0)
+        if skips > 0 and self.deny_skipping:
+            return testcase.TestCase.EX_TESTCASE_FAILED
+        return super(TempestCommon, self).is_successful()
